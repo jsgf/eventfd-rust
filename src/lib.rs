@@ -76,7 +76,9 @@ impl EventFD {
     /// events; if this task blocks on send, the event state will
     /// still update.
     ///
-    /// This will be an infinite loop if the EventFD is created
+    /// The task will exit if the receiver end is shut down.
+    ///
+    /// This will be a CPU-spin loop if the EventFD is created
     /// non-blocking.
     ///
     /// XXX FIXME This has no way of terminating except if the other
@@ -89,7 +91,10 @@ impl EventFD {
         spawn(proc() {
             loop {
                 match c.read() {
-                    Ok(v) => tx.send(v),
+                    Ok(v) => match tx.send_opt(v) {
+                        Ok(_) => (),
+                        Err(_) => break,
+                    },
                     Err(e) => panic!("read failed: {}", e),
                 }
             }
@@ -183,19 +188,19 @@ fn test_sema() {
 
 #[test]
 fn test_stream() {
-    let efd = match EventFD::new(10, EFD_SEMAPHORE) {
+    let efd = match EventFD::new(11, EFD_SEMAPHORE) {
         Err(e) => panic!("new failed {}", e),
         Ok(fd) => fd,
     };
     let mut count = 0;
 
-    for v in efd.events().iter() {
+    // only take 10 of 11 so the stream task doesn't block in read and hang the test
+    for v in efd.events().iter().take(10) {
         assert!(v == 1);
         count += v;
-        if count == 10 {
-            break;
-        }
     }
+
+    assert!(count == 10)
 }
 
 #[test]
