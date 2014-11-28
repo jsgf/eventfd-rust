@@ -1,7 +1,7 @@
 [package]
 
 name = "eventfd"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["Jeremy Fitzhardinge <jeremy@goop.org>"]
 description = "Binding to Linux's eventfd syscall"
 readme = "README.md"
