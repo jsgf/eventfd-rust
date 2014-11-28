@@ -39,6 +39,12 @@ impl EventFD {
         }
     }
 
+    /// Return the raw underlying fd. The caller must make sure self's
+    /// lifetime is longer than any users of the fd.
+    pub unsafe fn get_fd(&self) -> uint {
+        self.fd
+    }
+
     /// Read the current value of the eventfd. This will block until
     /// the value is non-zero. In semaphore mode this will only ever
     /// decrement the count by 1 and return 1; otherwise it atomically
