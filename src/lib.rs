@@ -7,6 +7,7 @@ extern crate libc;
 
 use libc::{c_int, c_uint, c_void};
 use std::io::{IoResult, IoError};
+use std::os::unix::{AsRawFd,Fd};
 
 pub struct EventFD {
     fd: uint,
@@ -107,6 +108,12 @@ impl EventFD {
         });
 
         rx
+    }
+}
+
+impl AsRawFd for EventFD {
+    fn as_raw_fd(&self) -> Fd {
+        unsafe { self.get_fd() as Fd }
     }
 }
 
