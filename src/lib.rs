@@ -144,91 +144,97 @@ extern "C" {
 }
 
 
-#[test]
-fn test_basic() {
-    let (tx,rx) = std::comm::channel();
-    let efd = match EventFD::new(10, 0) {
-        Err(e) => panic!("new failed {}", e),
-        Ok(fd) => fd,
-    };
-    let cefd = efd.clone();
+#[cfg(test)]
+mod test {
+    extern crate std;
+    use super::{EventFD, EFD_SEMAPHORE, EFD_NONBLOCK};
 
-    assert_eq!(efd.read(), Ok(10));
+    #[test]
+    fn test_basic() {
+        let (tx,rx) = std::comm::channel();
+        let efd = match EventFD::new(10, 0) {
+            Err(e) => panic!("new failed {}", e),
+            Ok(fd) => fd,
+        };
+        let cefd = efd.clone();
 
-    spawn(proc() {
-        assert_eq!(cefd.read(), Ok(7));
-        assert_eq!(cefd.write(1), Ok(()));
-        assert_eq!(cefd.write(2), Ok(()));
-        tx.send(());
-    });
+        assert_eq!(efd.read(), Ok(10));
 
-    assert_eq!(efd.write(7), Ok(()));
-    rx.recv();
-    assert_eq!(efd.read(), Ok(3));
-}
+        spawn(proc() {
+            assert_eq!(cefd.read(), Ok(7));
+            assert_eq!(cefd.write(1), Ok(()));
+            assert_eq!(cefd.write(2), Ok(()));
+            tx.send(());
+        });
 
-#[test]
-fn test_sema() {
-    let efd = match EventFD::new(0, EFD_SEMAPHORE | EFD_NONBLOCK) {
-        Err(e) => panic!("new failed {}", e),
-        Ok(fd) => fd,
-    };
-    
-    match efd.read() {
-        Err(ref e) if e.kind == std::io::ResourceUnavailable => (), // ok
-        Err(e) => panic!("unexpected error {}", e),
-        Ok(v) => panic!("unexpected success {}", v),
+        assert_eq!(efd.write(7), Ok(()));
+        rx.recv();
+        assert_eq!(efd.read(), Ok(3));
     }
 
-    assert_eq!(efd.write(5), Ok(()));
+    #[test]
+    fn test_sema() {
+        let efd = match EventFD::new(0, EFD_SEMAPHORE | EFD_NONBLOCK) {
+            Err(e) => panic!("new failed {}", e),
+            Ok(fd) => fd,
+        };
 
-    assert_eq!(efd.read(), Ok(1));
-    assert_eq!(efd.read(), Ok(1));
-    assert_eq!(efd.read(), Ok(1));
-    assert_eq!(efd.read(), Ok(1));
-    assert_eq!(efd.read(), Ok(1));
-    match efd.read() {
-        Err(ref e) if e.kind == std::io::ResourceUnavailable => (), // ok
-        Err(e) => panic!("unexpected error {}", e),
-        Ok(v) => panic!("unexpected success {}", v),
+        match efd.read() {
+            Err(ref e) if e.kind == std::io::ResourceUnavailable => (), // ok
+            Err(e) => panic!("unexpected error {}", e),
+            Ok(v) => panic!("unexpected success {}", v),
+        }
+
+        assert_eq!(efd.write(5), Ok(()));
+
+        assert_eq!(efd.read(), Ok(1));
+        assert_eq!(efd.read(), Ok(1));
+        assert_eq!(efd.read(), Ok(1));
+        assert_eq!(efd.read(), Ok(1));
+        assert_eq!(efd.read(), Ok(1));
+        match efd.read() {
+            Err(ref e) if e.kind == std::io::ResourceUnavailable => (), // ok
+            Err(e) => panic!("unexpected error {}", e),
+            Ok(v) => panic!("unexpected success {}", v),
+        }
     }
-}
 
-#[test]
-fn test_stream() {
-    let efd = match EventFD::new(11, EFD_SEMAPHORE) {
-        Err(e) => panic!("new failed {}", e),
-        Ok(fd) => fd,
-    };
-    let mut count = 0;
+    #[test]
+    fn test_stream() {
+        let efd = match EventFD::new(11, EFD_SEMAPHORE) {
+            Err(e) => panic!("new failed {}", e),
+            Ok(fd) => fd,
+        };
+        let mut count = 0;
 
-    // only take 10 of 11 so the stream task doesn't block in read and hang the test
-    for v in efd.events().iter().take(10) {
-        assert_eq!(v, 1);
-        count += v;
+        // only take 10 of 11 so the stream task doesn't block in read and hang the test
+        for v in efd.events().iter().take(10) {
+            assert_eq!(v, 1);
+            count += v;
+        }
+
+        assert_eq!(count, 10)
     }
 
-    assert_eq!(count, 10)
-}
+    #[test]
+    fn test_chan() {
+        let (tx,rx) = std::comm::channel();
+        let efd = match EventFD::new(10, 0) {
+            Err(e) => panic!("new failed {}", e),
+            Ok(fd) => fd,
+        };
 
-#[test]
-fn test_chan() {
-    let (tx,rx) = std::comm::channel();
-    let efd = match EventFD::new(10, 0) {
-        Err(e) => panic!("new failed {}", e),
-        Ok(fd) => fd,
-    };
+        assert_eq!(efd.write(1), Ok(()));
+        tx.send(efd);
 
-    assert_eq!(efd.write(1), Ok(()));
-    tx.send(efd);
+        let t = std::task::try(proc() {
+            let efd = rx.recv();
+            assert_eq!(efd.read(), Ok(11))
+        });
 
-    let t = std::task::try(proc() {
-        let efd = rx.recv();
-        assert_eq!(efd.read(), Ok(11))
-    });
-
-    match t {
-        Ok(_) => println!("ok"),
-        Err(_) => panic!("failed"),
+        match t {
+            Ok(_) => println!("ok"),
+            Err(_) => panic!("failed"),
+        }
     }
 }
