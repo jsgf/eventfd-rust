@@ -1,7 +1,7 @@
-/// EventFD binding
-///
-/// This crate implements a simple binding for Linux eventfd(). See
-/// eventfd(2) for specific details of behaviour.
+//! EventFD binding
+//!
+//! This crate implements a simple binding for Linux eventfd(). See
+//! eventfd(2) for specific details of behaviour.
 
 extern crate libc;
 
@@ -9,6 +9,8 @@ use libc::{c_int, c_uint, c_void};
 use std::io::{IoResult, IoError};
 use std::os::unix::{AsRawFd,Fd};
 
+#[deriving(Send)]
+#[deriving(Sync)]
 pub struct EventFD {
     fd: uint,
     flags: uint,
@@ -38,12 +40,6 @@ impl EventFD {
         } else {
             Ok(EventFD { fd: r as uint, flags: flags })
         }
-    }
-
-    /// Return the raw underlying fd. The caller must make sure self's
-    /// lifetime is longer than any users of the fd.
-    pub unsafe fn get_fd(&self) -> uint {
-        self.fd
     }
 
     /// Read the current value of the eventfd. This will block until
@@ -112,13 +108,12 @@ impl EventFD {
 }
 
 impl AsRawFd for EventFD {
+    /// Return the raw underlying fd. The caller must make sure self's
+    /// lifetime is longer than any users of the fd.
     fn as_raw_fd(&self) -> Fd {
-        unsafe { self.get_fd() as Fd }
+        self.fd as Fd
     }
 }
-
-impl Sync for EventFD {}
-impl Send for EventFD {}
 
 impl Drop for EventFD {
     fn drop(&mut self) {
