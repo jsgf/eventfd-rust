@@ -153,18 +153,18 @@ fn test_basic() {
     };
     let cefd = efd.clone();
 
-    assert!(efd.read() == Ok(10));
+    assert_eq!(efd.read(), Ok(10));
 
     spawn(proc() {
-        assert!(cefd.read() == Ok(7));
-        assert!(cefd.write(1) == Ok(()));
-        assert!(cefd.write(2) == Ok(()));
+        assert_eq!(cefd.read(), Ok(7));
+        assert_eq!(cefd.write(1), Ok(()));
+        assert_eq!(cefd.write(2), Ok(()));
         tx.send(());
     });
 
-    assert!(efd.write(7) == Ok(()));
+    assert_eq!(efd.write(7), Ok(()));
     rx.recv();
-    assert!(efd.read() == Ok(3));
+    assert_eq!(efd.read(), Ok(3));
 }
 
 #[test]
@@ -180,13 +180,13 @@ fn test_sema() {
         Ok(v) => panic!("unexpected success {}", v),
     }
 
-    assert!(efd.write(5) == Ok(()));
+    assert_eq!(efd.write(5), Ok(()));
 
-    assert!(efd.read() == Ok(1));
-    assert!(efd.read() == Ok(1));
-    assert!(efd.read() == Ok(1));
-    assert!(efd.read() == Ok(1));
-    assert!(efd.read() == Ok(1));
+    assert_eq!(efd.read(), Ok(1));
+    assert_eq!(efd.read(), Ok(1));
+    assert_eq!(efd.read(), Ok(1));
+    assert_eq!(efd.read(), Ok(1));
+    assert_eq!(efd.read(), Ok(1));
     match efd.read() {
         Err(ref e) if e.kind == std::io::ResourceUnavailable => (), // ok
         Err(e) => panic!("unexpected error {}", e),
@@ -204,11 +204,11 @@ fn test_stream() {
 
     // only take 10 of 11 so the stream task doesn't block in read and hang the test
     for v in efd.events().iter().take(10) {
-        assert!(v == 1);
+        assert_eq!(v, 1);
         count += v;
     }
 
-    assert!(count == 10)
+    assert_eq!(count, 10)
 }
 
 #[test]
@@ -219,12 +219,12 @@ fn test_chan() {
         Ok(fd) => fd,
     };
 
-    assert!(efd.write(1) == Ok(()));
+    assert_eq!(efd.write(1), Ok(()));
     tx.send(efd);
 
     let t = std::task::try(proc() {
         let efd = rx.recv();
-        assert!(efd.read() == Ok(11))
+        assert_eq!(efd.read(), Ok(11))
     });
 
     match t {
