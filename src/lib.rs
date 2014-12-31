@@ -9,12 +9,13 @@ use libc::{c_int, c_uint, c_void};
 use std::io::{IoResult, IoError};
 use std::os::unix::{AsRawFd,Fd};
 
-#[deriving(Send)]
-#[deriving(Sync)]
 pub struct EventFD {
     fd: uint,
     flags: uint,
 }
+
+unsafe impl Send for EventFD {}
+unsafe impl Sync for EventFD {}
 
 /// Construct a semaphore-style EventFD.
 pub const EFD_SEMAPHORE: uint = 0x00001; // 00000001
@@ -91,7 +92,7 @@ impl EventFD {
         let (tx, rx) = std::comm::sync_channel(1);
         let c = self.clone();
 
-        spawn(proc() {
+        std::thread::Thread::spawn(move || {
             loop {
                 match c.read() {
                     Ok(v) => match tx.send_opt(v) {
@@ -101,7 +102,7 @@ impl EventFD {
                     Err(e) => panic!("read failed: {}", e),
                 }
             }
-        });
+        }).detach();
 
         rx
     }
@@ -155,12 +156,12 @@ fn test_basic() {
 
     assert!(efd.read() == Ok(10));
 
-    spawn(proc() {
+    std::thread::Thread::spawn(move || {
         assert!(cefd.read() == Ok(7));
         assert!(cefd.write(1) == Ok(()));
         assert!(cefd.write(2) == Ok(()));
         tx.send(());
-    });
+    }).detach();
 
     assert!(efd.write(7) == Ok(()));
     rx.recv();
@@ -222,10 +223,10 @@ fn test_chan() {
     assert!(efd.write(1) == Ok(()));
     tx.send(efd);
 
-    let t = std::task::try(proc() {
+    let t = std::thread::Thread::spawn(move || {
         let efd = rx.recv();
         assert!(efd.read() == Ok(11))
-    });
+    }).join();
 
     match t {
         Ok(_) => println!("ok"),
