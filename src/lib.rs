@@ -8,6 +8,7 @@ extern crate libc;
 use libc::{c_int, c_uint, c_void};
 use std::io::{IoResult, IoError};
 use std::os::unix::{AsRawFd,Fd};
+use std::thread::Thread;
 
 pub struct EventFD {
     fd: uint,
@@ -92,7 +93,7 @@ impl EventFD {
         let (tx, rx) = std::comm::sync_channel(1);
         let c = self.clone();
 
-        std::thread::Thread::spawn(move || {
+        Thread::spawn(move || {
             loop {
                 match c.read() {
                     Ok(v) => match tx.send_opt(v) {
@@ -156,7 +157,7 @@ fn test_basic() {
 
     assert!(efd.read() == Ok(10));
 
-    std::thread::Thread::spawn(move || {
+    Thread::spawn(move || {
         assert!(cefd.read() == Ok(7));
         assert!(cefd.write(1) == Ok(()));
         assert!(cefd.write(2) == Ok(()));
@@ -223,7 +224,7 @@ fn test_chan() {
     assert!(efd.write(1) == Ok(()));
     tx.send(efd);
 
-    let t = std::thread::Thread::spawn(move || {
+    let t = Thread::spawn(move || {
         let efd = rx.recv();
         assert!(efd.read() == Ok(11))
     }).join();
