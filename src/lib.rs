@@ -1,3 +1,4 @@
+#![cfg(target_os = "linux")]
 //! EventFD binding
 //!
 //! This crate implements a simple binding for Linux eventfd(). See
