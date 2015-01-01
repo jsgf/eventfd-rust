@@ -8,13 +8,15 @@ extern crate libc;
 use libc::{c_int, c_uint, c_void};
 use std::io::{IoResult, IoError};
 use std::os::unix::{AsRawFd,Fd};
+use std::thread::Thread;
 
-#[deriving(Send)]
-#[deriving(Sync)]
 pub struct EventFD {
     fd: uint,
     flags: uint,
 }
+
+unsafe impl Send for EventFD {}
+unsafe impl Sync for EventFD {}
 
 /// Construct a semaphore-style EventFD.
 pub const EFD_SEMAPHORE: uint = 0x00001; // 00000001
@@ -91,7 +93,7 @@ impl EventFD {
         let (tx, rx) = std::comm::sync_channel(1);
         let c = self.clone();
 
-        spawn(proc() {
+        Thread::spawn(move || {
             loop {
                 match c.read() {
                     Ok(v) => match tx.send_opt(v) {
@@ -101,7 +103,7 @@ impl EventFD {
                     Err(e) => panic!("read failed: {}", e),
                 }
             }
-        });
+        }).detach();
 
         rx
     }
@@ -148,6 +150,7 @@ extern "C" {
 mod test {
     extern crate std;
     use super::{EventFD, EFD_SEMAPHORE, EFD_NONBLOCK};
+    use std::thread::Thread;
 
     #[test]
     fn test_basic() {
@@ -160,12 +163,12 @@ mod test {
 
         assert_eq!(efd.read(), Ok(10));
 
-        spawn(proc() {
+        Thread::spawn(move || {
             assert_eq!(cefd.read(), Ok(7));
             assert_eq!(cefd.write(1), Ok(()));
             assert_eq!(cefd.write(2), Ok(()));
             tx.send(());
-        });
+        }).detach();
 
         assert_eq!(efd.write(7), Ok(()));
         rx.recv();
@@ -227,10 +230,10 @@ mod test {
         assert_eq!(efd.write(1), Ok(()));
         tx.send(efd);
 
-        let t = std::task::try(proc() {
+        let t = Thread::spawn(move || {
             let efd = rx.recv();
             assert_eq!(efd.read(), Ok(11))
-        });
+        }).join();
 
         match t {
             Ok(_) => println!("ok"),
