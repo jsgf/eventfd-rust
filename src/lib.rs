@@ -6,28 +6,29 @@
 
 extern crate libc;
 
-use libc::{c_int, c_uint, c_void};
-use std::io::{IoResult, IoError};
-use std::os::unix::{AsRawFd,Fd};
-use std::thread::Thread;
+use self::libc::{c_int, c_uint, c_void};
+use std::io;
+use std::os::unix::io::{AsRawFd,RawFd};
+use std::thread;
+use std::sync::mpsc;
 
 pub struct EventFD {
-    fd: uint,
-    flags: uint,
+    fd: u32,
+    flags: u32,
 }
 
 unsafe impl Send for EventFD {}
 unsafe impl Sync for EventFD {}
 
 /// Construct a semaphore-style EventFD.
-pub const EFD_SEMAPHORE: uint = 0x00001; // 00000001
+pub const EFD_SEMAPHORE: u32 = 0x00001; // 00000001
 
-/// In non-blocking mode, reads and writes will return IoError
+/// In non-blocking mode, reads and writes will return io::Error
 /// containing EAGAIN rather than blocking.
-pub const EFD_NONBLOCK: uint  = 0x00800; // 00004000
+pub const EFD_NONBLOCK: u32  = 0x00800; // 00004000
 
 /// Set the close-on-exec flag on the eventfd.
-pub const EFD_CLOEXEC: uint   = 0x80000; // 02000000
+pub const EFD_CLOEXEC: u32   = 0x80000; // 02000000
 
 impl EventFD {
     /// Create a new EventFD. Flags is the bitwise OR of EFD_* constants, or 0 for no flags.
@@ -35,13 +36,13 @@ impl EventFD {
     ///
     /// TODO: work out how to integrate this FD into the wider world
     /// of fds. There's currently no way to poll/select on the fd.
-    pub fn new(initval: uint, flags: uint) -> IoResult<EventFD> {
-        let r = unsafe { eventfd(initval as u32, flags as u32) };
+    pub fn new(initval: u32, flags: u32) -> io::Result<EventFD> {
+        let r = unsafe { eventfd(initval as c_uint, flags as c_int) };
 
         if r < 0 {
-            Err(IoError::last_error())
+            Err(io::Error::last_os_error())
         } else {
-            Ok(EventFD { fd: r as uint, flags: flags })
+            Ok(EventFD { fd: r as u32, flags: flags })
         }
     }
 
@@ -49,29 +50,29 @@ impl EventFD {
     /// the value is non-zero. In semaphore mode this will only ever
     /// decrement the count by 1 and return 1; otherwise it atomically
     /// returns the current value and sets it to zero.
-    pub fn read(&self) -> IoResult<u64> {
+    pub fn read(&self) -> io::Result<u64> {
         let mut ret : u64 = 0;
         let r = unsafe {
             let ptr : *mut u64 = &mut ret;
-            ::libc::read(self.fd as c_int, ptr as *mut c_void, std::mem::size_of_val(&ret) as u64)
+            libc::read(self.fd as c_int, ptr as *mut c_void, std::mem::size_of_val(&ret) as u64)
         };
 
         if r < 0 {
-            Err(IoError::last_error())
+            Err(io::Error::last_os_error())
         } else {
             Ok(ret)
         }
     }
 
     /// Add to the current value. Blocks if the value would wrap u64.
-    pub fn write(&self, val: u64) -> IoResult<()> {
+    pub fn write(&self, val: u64) -> io::Result<()> {
         let r = unsafe {
             let ptr : *const u64 = &val;
-            ::libc::write(self.fd as c_int, ptr as *const c_void, std::mem::size_of_val(&val) as u64)
+            libc::write(self.fd as c_int, ptr as *const c_void, std::mem::size_of_val(&val) as u64)
         };
 
         if r < 0 {
-            Err(IoError::last_error())
+            Err(io::Error::last_os_error())
         } else {
             Ok(())
         }
@@ -90,21 +91,21 @@ impl EventFD {
     /// XXX FIXME This has no way of terminating except if the other
     /// end closes the connection, and only then if we're not blocked
     /// in the read()...
-    pub fn events(&self) -> std::comm::Receiver<u64> {
-        let (tx, rx) = std::comm::sync_channel(1);
+    pub fn events(&self) -> mpsc::Receiver<u64> {
+        let (tx, rx) = mpsc::sync_channel(1);
         let c = self.clone();
 
-        Thread::spawn(move || {
+        thread::spawn(move || {
             loop {
                 match c.read() {
-                    Ok(v) => match tx.send_opt(v) {
+                    Ok(v) => match tx.send(v) {
                         Ok(_) => (),
                         Err(_) => break,
                     },
                     Err(e) => panic!("read failed: {}", e),
                 }
             }
-        }).detach();
+        });
 
         rx
     }
@@ -113,14 +114,14 @@ impl EventFD {
 impl AsRawFd for EventFD {
     /// Return the raw underlying fd. The caller must make sure self's
     /// lifetime is longer than any users of the fd.
-    fn as_raw_fd(&self) -> Fd {
-        self.fd as Fd
+    fn as_raw_fd(&self) -> RawFd {
+        self.fd as RawFd
     }
 }
 
 impl Drop for EventFD {
     fn drop(&mut self) {
-        let r = unsafe { ::libc::close(self.fd as c_int) };
+        let r = unsafe { libc::close(self.fd as c_int) };
         if r < 0 {
             panic!("eventfd close {} failed", self.fd)
         }
@@ -132,18 +133,18 @@ impl Drop for EventFD {
 /// indistinguishable from the original.
 impl Clone for EventFD {
     fn clone(&self) -> EventFD {
-        let r = unsafe { ::libc::dup(self.fd as c_int) };
+        let r = unsafe { libc::dup(self.fd as c_int) };
         if r < 0 {
-            panic!("EventFD clone dup failed: {}", IoError::last_error())
+            panic!("EventFD clone dup failed: {}", io::Error::last_os_error())
         }
 
-        EventFD { fd: r as uint, flags: self.flags }
+        EventFD { fd: r as u32, flags: self.flags }
     }
 }
 
 #[link(name = "c")]
 extern "C" {
-    fn eventfd(initval: c_uint, flags: c_uint) -> c_int;
+    fn eventfd(initval: c_uint, flags: c_int) -> c_int;
 }
 
 
@@ -151,29 +152,29 @@ extern "C" {
 mod test {
     extern crate std;
     use super::{EventFD, EFD_SEMAPHORE, EFD_NONBLOCK};
-    use std::thread::Thread;
+    use std::thread;
 
     #[test]
     fn test_basic() {
-        let (tx,rx) = std::comm::channel();
+        let (tx,rx) = std::sync::mpsc::channel();
         let efd = match EventFD::new(10, 0) {
             Err(e) => panic!("new failed {}", e),
             Ok(fd) => fd,
         };
         let cefd = efd.clone();
 
-        assert_eq!(efd.read(), Ok(10));
+        assert_eq!(efd.read().unwrap(), 10);
 
-        Thread::spawn(move || {
-            assert_eq!(cefd.read(), Ok(7));
-            assert_eq!(cefd.write(1), Ok(()));
-            assert_eq!(cefd.write(2), Ok(()));
-            tx.send(());
-        }).detach();
+        thread::spawn(move || {
+            assert_eq!(cefd.read().unwrap(), 7);
+            assert_eq!(cefd.write(1).unwrap(), ());
+            assert_eq!(cefd.write(2).unwrap(), ());
+            assert!(tx.send(()).is_ok());
+        });
 
-        assert_eq!(efd.write(7), Ok(()));
-        rx.recv();
-        assert_eq!(efd.read(), Ok(3));
+        assert_eq!(efd.write(7).unwrap(), ());
+        let _ = rx.recv();
+        assert_eq!(efd.read().unwrap(), 3);
     }
 
     #[test]
@@ -184,20 +185,20 @@ mod test {
         };
 
         match efd.read() {
-            Err(ref e) if e.kind == std::io::ResourceUnavailable => (), // ok
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => (), // ok
             Err(e) => panic!("unexpected error {}", e),
             Ok(v) => panic!("unexpected success {}", v),
         }
 
-        assert_eq!(efd.write(5), Ok(()));
+        assert_eq!(efd.write(5).unwrap(), ());
 
-        assert_eq!(efd.read(), Ok(1));
-        assert_eq!(efd.read(), Ok(1));
-        assert_eq!(efd.read(), Ok(1));
-        assert_eq!(efd.read(), Ok(1));
-        assert_eq!(efd.read(), Ok(1));
+        assert_eq!(efd.read().unwrap(), 1);
+        assert_eq!(efd.read().unwrap(), 1);
+        assert_eq!(efd.read().unwrap(), 1);
+        assert_eq!(efd.read().unwrap(), 1);
+        assert_eq!(efd.read().unwrap(), 1);
         match efd.read() {
-            Err(ref e) if e.kind == std::io::ResourceUnavailable => (), // ok
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => (), // ok
             Err(e) => panic!("unexpected error {}", e),
             Ok(v) => panic!("unexpected success {}", v),
         }
@@ -222,18 +223,18 @@ mod test {
 
     #[test]
     fn test_chan() {
-        let (tx,rx) = std::comm::channel();
+        let (tx,rx) = std::sync::mpsc::channel();
         let efd = match EventFD::new(10, 0) {
             Err(e) => panic!("new failed {}", e),
             Ok(fd) => fd,
         };
 
-        assert_eq!(efd.write(1), Ok(()));
-        tx.send(efd);
+        assert_eq!(efd.write(1).unwrap(), ());
+        assert!(tx.send(efd).is_ok());
 
-        let t = Thread::spawn(move || {
-            let efd = rx.recv();
-            assert_eq!(efd.read(), Ok(11))
+        let t = thread::spawn(move || {
+            let efd = rx.recv().unwrap();
+            assert_eq!(efd.read().unwrap(), 11)
         }).join();
 
         match t {
