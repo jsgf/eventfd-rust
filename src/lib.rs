@@ -30,6 +30,11 @@ pub const EFD_NONBLOCK: u32  = 0x00800; // 00004000
 /// Set the close-on-exec flag on the eventfd.
 pub const EFD_CLOEXEC: u32   = 0x80000; // 02000000
 
+#[link(name = "c")]
+extern "C" {
+    fn eventfd(initval: c_uint, flags: c_int) -> c_int;
+}
+
 impl EventFD {
     /// Create a new EventFD. Flags is the bitwise OR of EFD_* constants, or 0 for no flags.
     /// The underlying file descriptor is closed when the EventFD instance's lifetime ends.
@@ -78,19 +83,17 @@ impl EventFD {
         }
     }
 
-    /// Return a stream of events. The channel has a synchronous
-    /// sender because there's no point in building up a queue of
-    /// events; if this task blocks on send, the event state will
-    /// still update.
+    /// Return a stream of events.
+    ///
+    /// The channel has a synchronous sender because there's no point in building up a queue of
+    /// events; if this task blocks on send, the event state will still update.
     ///
     /// The task will exit if the receiver end is shut down.
     ///
-    /// This will be a CPU-spin loop if the EventFD is created
-    /// non-blocking.
+    /// This will be a CPU-spin loop if the EventFD is created non-blocking.
     ///
-    /// XXX FIXME This has no way of terminating except if the other
-    /// end closes the connection, and only then if we're not blocked
-    /// in the read()...
+    /// XXX FIXME This has no way of terminating except if the other end closes the connection, and
+    /// only then if we're not blocked in the read()...
     pub fn events(&self) -> mpsc::Receiver<u64> {
         let (tx, rx) = mpsc::sync_channel(1);
         let c = self.clone();
@@ -141,12 +144,6 @@ impl Clone for EventFD {
         EventFD { fd: r as u32, flags: self.flags }
     }
 }
-
-#[link(name = "c")]
-extern "C" {
-    fn eventfd(initval: c_uint, flags: c_int) -> c_int;
-}
-
 
 #[cfg(test)]
 mod test {
