@@ -8,5 +8,6 @@ repository = "https://github.com/jsgf/eventfd-rust.git"
 readme = "README.md"
 license = "MIT"
 
-[dependencies]
-libc = "*"
+[dependencies.nix]
+git = "https://github.com/jsgf/nix-rust.git"
+features = [ "eventfd" ]

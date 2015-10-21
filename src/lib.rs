@@ -4,36 +4,25 @@
 //! This crate implements a simple binding for Linux eventfd(). See
 //! eventfd(2) for specific details of behaviour.
 
-extern crate libc;
+extern crate nix;
 
-use self::libc::{c_int, c_uint, c_void};
+pub use nix::sys::eventfd::{EventFdFlag, EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE};
+use nix::sys::eventfd::eventfd;
+use nix::unistd::{dup, close, write, read};
+
 use std::io;
 use std::os::unix::io::{AsRawFd,RawFd};
 use std::thread;
 use std::sync::mpsc;
+use std::mem;
 
 pub struct EventFD {
-    fd: u32,
-    flags: u32,
+    fd: RawFd,
+    flags: EventFdFlag,
 }
 
 unsafe impl Send for EventFD {}
 unsafe impl Sync for EventFD {}
-
-/// Construct a semaphore-style EventFD.
-pub const EFD_SEMAPHORE: u32 = 0x00001; // 00000001
-
-/// In non-blocking mode, reads and writes will return io::Error
-/// containing EAGAIN rather than blocking.
-pub const EFD_NONBLOCK: u32  = 0x00800; // 00004000
-
-/// Set the close-on-exec flag on the eventfd.
-pub const EFD_CLOEXEC: u32   = 0x80000; // 02000000
-
-#[link(name = "c")]
-extern "C" {
-    fn eventfd(initval: c_uint, flags: c_int) -> c_int;
-}
 
 impl EventFD {
     /// Create a new EventFD. Flags is the bitwise OR of EFD_* constants, or 0 for no flags.
@@ -41,14 +30,8 @@ impl EventFD {
     ///
     /// TODO: work out how to integrate this FD into the wider world
     /// of fds. There's currently no way to poll/select on the fd.
-    pub fn new(initval: u32, flags: u32) -> io::Result<EventFD> {
-        let r = unsafe { eventfd(initval as c_uint, flags as c_int) };
-
-        if r < 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(EventFD { fd: r as u32, flags: flags })
-        }
+    pub fn new(initval: usize, flags: EventFdFlag) -> io::Result<EventFD> {
+        Ok(EventFD { fd: try!(eventfd(initval, flags)), flags: flags })
     }
 
     /// Read the current value of the eventfd. This will block until
@@ -56,31 +39,17 @@ impl EventFD {
     /// decrement the count by 1 and return 1; otherwise it atomically
     /// returns the current value and sets it to zero.
     pub fn read(&self) -> io::Result<u64> {
-        let mut ret : u64 = 0;
-        let r = unsafe {
-            let ptr : *mut u64 = &mut ret;
-            libc::read(self.fd as c_int, ptr as *mut c_void, std::mem::size_of_val(&ret) as u64)
-        };
-
-        if r < 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(ret)
-        }
+        let mut buf = [0u8; 8];
+        let _ = try!(read(self.fd, &mut buf));
+        let val = unsafe { mem::transmute(buf) };
+        Ok(val)
     }
 
     /// Add to the current value. Blocks if the value would wrap u64.
     pub fn write(&self, val: u64) -> io::Result<()> {
-        let r = unsafe {
-            let ptr : *const u64 = &val;
-            libc::write(self.fd as c_int, ptr as *const c_void, std::mem::size_of_val(&val) as u64)
-        };
-
-        if r < 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(())
-        }
+        let buf: [u8; 8] = unsafe { mem::transmute(val) };
+        try!(write(self.fd, &buf));
+        Ok(())
     }
 
     /// Return a stream of events.
@@ -124,10 +93,7 @@ impl AsRawFd for EventFD {
 
 impl Drop for EventFD {
     fn drop(&mut self) {
-        let r = unsafe { libc::close(self.fd as c_int) };
-        if r < 0 {
-            panic!("eventfd close {} failed", self.fd)
-        }
+        let _ = close(self.fd);
     }
 }
 
@@ -136,25 +102,20 @@ impl Drop for EventFD {
 /// indistinguishable from the original.
 impl Clone for EventFD {
     fn clone(&self) -> EventFD {
-        let r = unsafe { libc::dup(self.fd as c_int) };
-        if r < 0 {
-            panic!("EventFD clone dup failed: {}", io::Error::last_os_error())
-        }
-
-        EventFD { fd: r as u32, flags: self.flags }
+        EventFD { fd: dup(self.fd).unwrap(), flags: self.flags }
     }
 }
 
 #[cfg(test)]
 mod test {
     extern crate std;
-    use super::{EventFD, EFD_SEMAPHORE, EFD_NONBLOCK};
+    use super::{EventFdFlag, EventFD, EFD_SEMAPHORE, EFD_NONBLOCK};
     use std::thread;
 
     #[test]
     fn test_basic() {
         let (tx,rx) = std::sync::mpsc::channel();
-        let efd = match EventFD::new(10, 0) {
+        let efd = match EventFD::new(10, EventFdFlag::empty()) {
             Err(e) => panic!("new failed {}", e),
             Ok(fd) => fd,
         };
@@ -221,7 +182,7 @@ mod test {
     #[test]
     fn test_chan() {
         let (tx,rx) = std::sync::mpsc::channel();
-        let efd = match EventFD::new(10, 0) {
+        let efd = match EventFD::new(10, EventFdFlag::empty()) {
             Err(e) => panic!("new failed {}", e),
             Ok(fd) => fd,
         };
