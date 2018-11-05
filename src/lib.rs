@@ -1,36 +1,37 @@
 #![cfg(target_os = "linux")]
 //! EventFD binding
 //!
-//! This crate implements a simple binding for Linux eventfd(). See
-//! eventfd(2) for specific details of behaviour.
+//! This crate implements a simple object wrapper for Linux eventfd file
+//! descriptor. nix::sys::eventfd::eventfd() is used to create the descriptor.
+//! See nix crate's documentation and eventfd(2) for specific details of
+//! behaviour.
 
 extern crate nix;
 
-pub use nix::sys::eventfd::{EventFdFlag, EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE};
+pub use nix::sys::eventfd::EfdFlags;
 use nix::sys::eventfd::eventfd;
 use nix::unistd::{dup, close, write, read};
 
-use std::io;
-use std::os::unix::io::{AsRawFd,RawFd};
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::thread;
 use std::sync::mpsc;
 use std::mem;
 
 pub struct EventFD {
     fd: RawFd,
-    flags: EventFdFlag,
+    flags: EfdFlags,
 }
 
 unsafe impl Send for EventFD {}
 unsafe impl Sync for EventFD {}
 
 impl EventFD {
-    /// Create a new EventFD. Flags is the bitwise OR of EFD_* constants, or 0 for no flags.
+    /// Create a new EventFD. Flags is the bitwise OR of EfdFlags, or 0 for no flags.
     /// The underlying file descriptor is closed when the EventFD instance's lifetime ends.
     ///
     /// TODO: work out how to integrate this FD into the wider world
     /// of fds. There's currently no way to poll/select on the fd.
-    pub fn new(initval: usize, flags: EventFdFlag) -> io::Result<EventFD> {
+    pub fn new(initval: u32, flags: EfdFlags) -> Result<EventFD, nix::Error> {
         Ok(EventFD { fd: try!(eventfd(initval, flags)), flags: flags })
     }
 
@@ -38,7 +39,7 @@ impl EventFD {
     /// the value is non-zero. In semaphore mode this will only ever
     /// decrement the count by 1 and return 1; otherwise it atomically
     /// returns the current value and sets it to zero.
-    pub fn read(&self) -> io::Result<u64> {
+    pub fn read(&self) -> Result<u64, nix::Error> {
         let mut buf = [0u8; 8];
         let _ = try!(read(self.fd, &mut buf));
         let val = unsafe { mem::transmute(buf) };
@@ -46,7 +47,7 @@ impl EventFD {
     }
 
     /// Add to the current value. Blocks if the value would wrap u64.
-    pub fn write(&self, val: u64) -> io::Result<()> {
+    pub fn write(&self, val: u64) -> Result<(), nix::Error> {
         let buf: [u8; 8] = unsafe { mem::transmute(val) };
         try!(write(self.fd, &buf));
         Ok(())
@@ -109,13 +110,14 @@ impl Clone for EventFD {
 #[cfg(test)]
 mod test {
     extern crate std;
-    use super::{EventFdFlag, EventFD, EFD_SEMAPHORE, EFD_NONBLOCK};
+
+    use super::{EfdFlags, EventFD};
     use std::thread;
 
     #[test]
     fn test_basic() {
         let (tx,rx) = std::sync::mpsc::channel();
-        let efd = match EventFD::new(10, EventFdFlag::empty()) {
+        let efd = match EventFD::new(10, EfdFlags::empty()) {
             Err(e) => panic!("new failed {}", e),
             Ok(fd) => fd,
         };
@@ -137,13 +139,15 @@ mod test {
 
     #[test]
     fn test_sema() {
-        let efd = match EventFD::new(0, EFD_SEMAPHORE | EFD_NONBLOCK) {
+        let efd = match EventFD::new(0, EfdFlags::EFD_SEMAPHORE |
+                                     EfdFlags::EFD_NONBLOCK) {
             Err(e) => panic!("new failed {}", e),
             Ok(fd) => fd,
         };
 
         match efd.read() {
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => (), // ok
+            Err(nix::Error::Sys(errno)) if errno == nix::errno::EWOULDBLOCK =>
+                (), // ok
             Err(e) => panic!("unexpected error {}", e),
             Ok(v) => panic!("unexpected success {}", v),
         }
@@ -156,7 +160,8 @@ mod test {
         assert_eq!(efd.read().unwrap(), 1);
         assert_eq!(efd.read().unwrap(), 1);
         match efd.read() {
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => (), // ok
+            Err(nix::Error::Sys(errno)) if errno == nix::errno::EWOULDBLOCK =>
+                (), // ok
             Err(e) => panic!("unexpected error {}", e),
             Ok(v) => panic!("unexpected success {}", v),
         }
@@ -164,7 +169,7 @@ mod test {
 
     #[test]
     fn test_stream() {
-        let efd = match EventFD::new(11, EFD_SEMAPHORE) {
+        let efd = match EventFD::new(11, EfdFlags::EFD_SEMAPHORE) {
             Err(e) => panic!("new failed {}", e),
             Ok(fd) => fd,
         };
@@ -182,7 +187,7 @@ mod test {
     #[test]
     fn test_chan() {
         let (tx,rx) = std::sync::mpsc::channel();
-        let efd = match EventFD::new(10, EventFdFlag::empty()) {
+        let efd = match EventFD::new(10, EfdFlags::empty()) {
             Err(e) => panic!("new failed {}", e),
             Ok(fd) => fd,
         };
