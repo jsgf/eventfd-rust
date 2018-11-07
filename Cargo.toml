@@ -1,13 +1,12 @@
 [package]
 
 name = "eventfd"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Jeremy Fitzhardinge <jeremy@goop.org>"]
 description = "Binding to Linux's eventfd syscall"
 repository = "https://github.com/jsgf/eventfd-rust.git"
 readme = "README.md"
 license = "MIT"
 
-[dependencies.nix]
-git = "https://github.com/carllerche/nix-rust.git"
-features = [ "eventfd" ]
+[dependencies]
+nix = "0.11"
