@@ -1,7 +1,6 @@
 [package]
-
 name = "eventfd"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Jeremy Fitzhardinge <jeremy@goop.org>"]
 description = "Binding to Linux's eventfd syscall"
 repository = "https://github.com/jsgf/eventfd-rust.git"
