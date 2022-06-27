@@ -7,15 +7,16 @@
 extern crate nix;
 
 use nix::sys::eventfd::eventfd;
-pub use nix::sys::eventfd::EfdFlags; // {EfdFlags, EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE};
+pub use nix::sys::eventfd::EfdFlags;
 use nix::unistd::{close, dup, read, write};
 
 use std::io;
-use std::mem;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::mpsc;
 use std::thread;
 
+/// An instance of an eventfd. This is a Linux-specific mechanism for publishing
+/// events from the kernel.
 pub struct EventFD {
     fd: RawFd,
     flags: EfdFlags,
@@ -25,11 +26,12 @@ unsafe impl Send for EventFD {}
 unsafe impl Sync for EventFD {}
 
 impl EventFD {
-    /// Create a new EventFD. Flags is the bitwise OR of EFD_* constants, or 0 for no flags.
-    /// The underlying file descriptor is closed when the EventFD instance's lifetime ends.
+    /// Create a new [`EventFD`]. Flags is the bitwise OR of EFD_* constants, or
+    /// 0 for no flags. The underlying file descriptor is closed when the
+    /// `EventFD` instance's lifetime ends.
     ///
-    /// TODO: work out how to integrate this FD into the wider world
-    /// of fds. There's currently no way to poll/select on the fd.
+    /// TODO: work out how to integrate this FD into the wider world of fds.
+    /// There's currently no way to poll/select on the fd.
     pub fn new(initval: u32, flags: EfdFlags) -> io::Result<EventFD> {
         Ok(EventFD {
             fd: eventfd(initval, flags)?,
@@ -37,10 +39,10 @@ impl EventFD {
         })
     }
 
-    /// Read the current value of the eventfd. This will block until
-    /// the value is non-zero. In semaphore mode this will only ever
-    /// decrement the count by 1 and return 1; otherwise it atomically
-    /// returns the current value and sets it to zero.
+    /// Read the current value of the eventfd. This will block until the value
+    /// is non-zero. In semaphore mode this will only ever decrement the count
+    /// by 1 and return 1; otherwise it atomically returns the current value and
+    /// sets it to zero.
     pub fn read(&self) -> io::Result<u64> {
         let mut buf = [0u8; 8];
         let _ = read(self.fd, &mut buf)?;
@@ -57,15 +59,16 @@ impl EventFD {
 
     /// Return a stream of events.
     ///
-    /// The channel has a synchronous sender because there's no point in building up a queue of
-    /// events; if this task blocks on send, the event state will still update.
+    /// The channel has a synchronous sender because there's no point in
+    /// building up a queue of events; if this task blocks on send, the event
+    /// state will still update.
     ///
     /// The task will exit if the receiver end is shut down.
     ///
     /// This will be a CPU-spin loop if the EventFD is created non-blocking.
     ///
-    /// XXX FIXME This has no way of terminating except if the other end closes the connection, and
-    /// only then if we're not blocked in the read()...
+    /// XXX FIXME This has no way of terminating except if the other end closes
+    /// the connection, and only then if we're not blocked in the read()...
     pub fn events(&self) -> mpsc::Receiver<u64> {
         let (tx, rx) = mpsc::sync_channel(1);
         let c = self.clone();
@@ -85,8 +88,8 @@ impl EventFD {
 }
 
 impl AsRawFd for EventFD {
-    /// Return the raw underlying fd. The caller must make sure self's
-    /// lifetime is longer than any users of the fd.
+    /// Return the raw underlying fd. The caller must make sure self's lifetime
+    /// is longer than any users of the fd.
     fn as_raw_fd(&self) -> RawFd {
         self.fd as RawFd
     }
@@ -98,9 +101,9 @@ impl Drop for EventFD {
     }
 }
 
-/// Construct a linked clone of an existing EventFD. Once created, the
-/// new instance interacts with the original in a way that's
-/// indistinguishable from the original.
+/// Construct a linked clone of an existing EventFD. Once created, the new
+/// instance interacts with the original in a way that's indistinguishable from
+/// the original.
 impl Clone for EventFD {
     fn clone(&self) -> EventFD {
         EventFD {
