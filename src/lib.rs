@@ -4,14 +4,12 @@
 //! This crate implements a simple binding for Linux eventfd(). See
 //! eventfd(2) for specific details of behaviour.
 
-extern crate nix;
-
 use nix::sys::eventfd::eventfd;
 pub use nix::sys::eventfd::EfdFlags;
 use nix::unistd::{close, dup, read, write};
 
 use std::io;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::sync::mpsc;
 use std::thread;
 
@@ -19,7 +17,6 @@ use std::thread;
 /// events from the kernel.
 pub struct EventFD {
     fd: RawFd,
-    flags: EfdFlags,
 }
 
 unsafe impl Send for EventFD {}
@@ -29,13 +26,9 @@ impl EventFD {
     /// Create a new [`EventFD`]. Flags is the bitwise OR of EFD_* constants, or
     /// 0 for no flags. The underlying file descriptor is closed when the
     /// `EventFD` instance's lifetime ends.
-    ///
-    /// TODO: work out how to integrate this FD into the wider world of fds.
-    /// There's currently no way to poll/select on the fd.
     pub fn new(initval: u32, flags: EfdFlags) -> io::Result<EventFD> {
         Ok(EventFD {
             fd: eventfd(initval, flags)?,
-            flags,
         })
     }
 
@@ -88,10 +81,20 @@ impl EventFD {
 }
 
 impl AsRawFd for EventFD {
-    /// Return the raw underlying fd. The caller must make sure self's lifetime
-    /// is longer than any users of the fd.
     fn as_raw_fd(&self) -> RawFd {
-        self.fd as RawFd
+        self.fd
+    }
+}
+
+impl IntoRawFd for EventFD {
+    fn into_raw_fd(self) -> RawFd {
+        self.fd
+    }
+}
+
+impl FromRawFd for EventFD {
+    unsafe fn from_raw_fd(fd: RawFd) -> Self {
+        Self { fd }
     }
 }
 
@@ -101,14 +104,13 @@ impl Drop for EventFD {
     }
 }
 
-/// Construct a linked clone of an existing EventFD. Once created, the new
-/// instance interacts with the original in a way that's indistinguishable from
-/// the original.
 impl Clone for EventFD {
+    /// Construct a linked clone of an existing EventFD. Once created, the new
+    /// instance interacts with the original in a way that's indistinguishable from
+    /// the original.
     fn clone(&self) -> EventFD {
         EventFD {
             fd: dup(self.fd).unwrap(),
-            flags: self.flags,
         }
     }
 }
