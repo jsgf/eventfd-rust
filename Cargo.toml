@@ -8,5 +8,7 @@ readme = "README.md"
 license = "MIT"
 edition = "2021"
 
-[dependencies]
-nix = "0.24"
+[dependencies.nix]
+version = "0.26"
+default-features = false
+features = ["event", "fs"]
