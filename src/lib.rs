@@ -1,4 +1,4 @@
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", target_os = "android"))]
 //! EventFD binding
 //!
 //! This crate implements a simple binding for Linux eventfd(). See
